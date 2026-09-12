@@ -34,7 +34,7 @@ function App() {
 
     try {
       // Step 1: Upload and extract text
-      const uploadResponse = await fetch('http://localhost:5000/upload', {
+      const uploadResponse = await fetch('https://study-mate-ai-dr3e.onrender.com/upload', {
         method: 'POST',
         body: formData,
       });
@@ -47,7 +47,7 @@ function App() {
 
       // Step 2: Generate summary + quiz using the extracted text
       setGenerating(true);
-      const generateResponse = await fetch('http://localhost:5000/generate', {
+      const generateResponse = await fetch('https://study-mate-ai-dr3e.onrender.com/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: uploadData.extractedText }),
