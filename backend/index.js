@@ -97,6 +97,7 @@ ${text}
     res.status(500).json({ error: 'Failed to generate summary and quiz', details: error.message });
   }
 });
-app.listen(5000, () => {
-  console.log('Server running on http://localhost:5000');
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
