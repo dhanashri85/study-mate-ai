@@ -32,28 +32,35 @@ app.get('/', (req, res) => {
 });
 
 // Upload endpoint
-app.post('/upload', upload.single('file'), async (req, res) => {
+app.post('/upload', upload.array('files', 5), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No files uploaded' });
     }
 
-    const filePath = req.file.path;
-    const fileBuffer = fs.readFileSync(filePath);
-
     const { PDFParse } = require('pdf-parse');
-    const parser = new PDFParse({ data: fileBuffer });
-    const data = await parser.getText();
+    let combinedText = '';
+    const filenames = [];
+
+    for (const file of req.files) {
+      const fileBuffer = fs.readFileSync(file.path);
+      const parser = new PDFParse({ data: fileBuffer });
+      const data = await parser.getText();
+
+      filenames.push(file.originalname);
+      combinedText += `\n\n--- From: ${file.originalname} ---\n\n` + data.text;
+    }
 
     res.json({
-      message: 'File uploaded and parsed successfully',
-      filename: req.file.originalname,
-      textLength: data.text.length,
-      extractedText: data.text.substring(0, 500) // first 500 chars as preview
+      message: 'Files uploaded and parsed successfully',
+      filenames: filenames,
+      textLength: combinedText.length,
+      extractedText: combinedText,
+      preview: combinedText.substring(0, 500)
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Failed to process file', details: error.message });
+    res.status(500).json({ error: 'Failed to process files', details: error.message });
   }
 });
 app.post('/generate', async (req, res) => {
@@ -67,9 +74,10 @@ app.post('/generate', async (req, res) => {
     const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
 
     const prompt = `
-You are a study assistant. Based on the following notes, do two things:
+You are a study assistant. Based on the following notes, do three things:
 1. Write a concise summary (5-8 sentences).
 2. Create 5 multiple-choice questions (MCQs) to test understanding, each with 4 options and the correct answer clearly marked.
+3. Create 6 flashcards, each with a short "front" (a key term or question) and a "back" (the definition or answer).
 
 Respond ONLY in valid JSON format, with no extra text, no markdown code fences, in this exact structure:
 {
@@ -80,13 +88,18 @@ Respond ONLY in valid JSON format, with no extra text, no markdown code fences, 
       "options": ["option A", "option B", "option C", "option D"],
       "correctAnswer": "the correct option text"
     }
+  ],
+  "flashcards": [
+    {
+      "front": "term or question",
+      "back": "definition or answer"
+    }
   ]
 }
 
 Notes:
 ${text}
     `;
-
     const result = await model.generateContent(prompt);
     let responseText = result.response.text();
 

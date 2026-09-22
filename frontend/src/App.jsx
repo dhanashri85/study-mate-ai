@@ -2,16 +2,22 @@ import { useState } from 'react';
 import './App.css';
 
 function App() {
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [aiResult, setAiResult] = useState(null);
   const [error, setError] = useState(null);
   const [answers, setAnswers] = useState({});
+  const [darkMode, setDarkMode] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [history, setHistory] = useState(() => {
+    const saved = localStorage.getItem('studymate-history');
+    return saved ? JSON.parse(saved) : [];
+  });
 
   const handleFileChange = (e) => {
-    setFile(e.target.files[0]);
+    setFiles(Array.from(e.target.files));
     setUploadResult(null);
     setAiResult(null);
     setError(null);
@@ -19,8 +25,8 @@ function App() {
   };
 
   const handleUpload = async () => {
-    if (!file) {
-      setError('Please select a PDF file first.');
+    if (!files || files.length === 0) {
+      setError('Please select at least one PDF file.');
       return;
     }
 
@@ -30,10 +36,9 @@ function App() {
     setAiResult(null);
 
     const formData = new FormData();
-    formData.append('file', file);
+    files.forEach((file) => formData.append('files', file));
 
     try {
-      // Step 1: Upload and extract text
       const uploadResponse = await fetch('https://study-mate-ai-dr3e.onrender.com/upload', {
         method: 'POST',
         body: formData,
@@ -45,7 +50,6 @@ function App() {
       setUploadResult(uploadData);
       setLoading(false);
 
-      // Step 2: Generate summary + quiz using the extracted text
       setGenerating(true);
       const generateResponse = await fetch('https://study-mate-ai-dr3e.onrender.com/generate', {
         method: 'POST',
@@ -57,6 +61,17 @@ function App() {
 
       const generateData = await generateResponse.json();
       setAiResult(generateData);
+      // Save to history
+      const newEntry = {
+        id: Date.now(),
+        filenames: uploadData.filenames,
+        summary: generateData.summary,
+        quiz: generateData.quiz,
+        date: new Date().toLocaleString(),
+      };
+      const updatedHistory = [newEntry, ...history].slice(0, 10); // keep last 10
+      setHistory(updatedHistory);
+      localStorage.setItem('studymate-history', JSON.stringify(updatedHistory));
     } catch (err) {
       setError('Something went wrong. Make sure the backend server is running.');
       console.error(err);
@@ -70,65 +85,149 @@ function App() {
     setAnswers({ ...answers, [qIndex]: option });
   };
 
-  return (
-    <div style={{ maxWidth: '700px', margin: '50px auto', fontFamily: 'sans-serif' }}>
-      <h1>StudyMate AI</h1>
-      <p>Upload your notes (PDF) to get a summary and quiz.</p>
+  const handleDownload = () => {
+    if (!aiResult) return;
 
-      <input type="file" accept=".pdf" onChange={handleFileChange} />
-      <button onClick={handleUpload} disabled={loading || generating} style={{ marginLeft: '10px' }}>
-        {loading ? 'Uploading...' : generating ? 'Generating...' : 'Upload'}
+    let content = `StudyMate AI - Summary & Quiz\n`;
+    content += `Files: ${uploadResult?.filenames?.join(', ') || 'N/A'}\n`;
+    content += `\n===== SUMMARY =====\n\n`;
+    content += aiResult.summary + '\n\n';
+    content += `===== QUIZ =====\n\n`;
+
+    aiResult.quiz.forEach((q, i) => {
+      content += `${i + 1}. ${q.question}\n`;
+      q.options.forEach((opt, j) => {
+        content += `   ${String.fromCharCode(65 + j)}) ${opt}\n`;
+      });
+      content += `   Correct Answer: ${q.correctAnswer}\n\n`;
+    });
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `studymate-summary.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+  const loadFromHistory = (entry) => {
+  setUploadResult({ filenames: entry.filenames });
+  setAiResult({ summary: entry.summary, quiz: entry.quiz });
+  setAnswers({});
+  setShowHistory(false);
+};
+
+const clearHistory = () => {
+  setHistory([]);
+  localStorage.removeItem('studymate-history');
+};
+
+  const score = aiResult
+    ? aiResult.quiz.filter((q, i) => answers[i] === q.correctAnswer).length
+    : 0;
+
+  return (
+    <div className={darkMode ? "app-container dark" : "app-container"}>
+      <div className="header">
+        <button className="theme-toggle" onClick={() => setDarkMode(!darkMode)}>
+          {darkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}
+        </button>
+        <h1>📚 StudyMate AI</h1>
+        <p>Upload your notes (PDF) and get an instant summary + quiz.</p>
+      </div>
+      {showHistory && (
+  <div className="history-panel">
+    <div className="history-header">
+      <h3>Upload History</h3>
+      {history.length > 0 && (
+        <button className="clear-history-btn" onClick={clearHistory}>Clear All</button>
+      )}
+    </div>
+    {history.length === 0 ? (
+      <p className="no-history">No past uploads yet.</p>
+    ) : (
+      history.map((entry) => (
+        <div key={entry.id} className="history-item" onClick={() => loadFromHistory(entry)}>
+          <p className="history-filename">📄 {entry.filenames?.join(', ')}</p>
+          <p className="history-date">{entry.date}</p>
+        </div>
+      ))
+    )}
+  </div>
+)}
+
+      <div className="upload-card">
+        <input type="file" accept=".pdf" multiple onChange={handleFileChange} className="file-input" />
+        <button onClick={handleUpload} disabled={loading || generating} className="upload-btn">
+          {loading ? 'Uploading...' : generating ? 'Generating...' : 'Upload'}
+        </button>
+      </div>
+      <button className="history-toggle" onClick={() => setShowHistory(!showHistory)}>
+        🕘 History ({history.length})
       </button>
 
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-
-      {uploadResult && (
-        <div style={{ marginTop: '20px', padding: '15px', border: '1px solid #ccc', borderRadius: '8px' }}>
-          <p><strong>File:</strong> {uploadResult.filename}</p>
+      {files.length > 0 && (
+        <div className="info-card">
+          <p><strong>📄 Selected:</strong> {files.map(f => f.name).join(', ')}</p>
         </div>
       )}
 
-      {generating && <p>Generating summary and quiz, please wait...</p>}
+      {error && <p className="error-text">{error}</p>}
+
+      {generating && (
+        <div className="loading-card">
+          <div className="spinner"></div>
+          <p>Generating summary and quiz, please wait...</p>
+        </div>
+      )}
 
       {aiResult && (
-        <div style={{ marginTop: '20px' }}>
-          <div style={{ padding: '15px', border: '1px solid #ccc', borderRadius: '8px', marginBottom: '20px' }}>
-            <h3>Summary</h3>
+        <div className="results">
+          <div className="summary-card">
+            <div className="summary-header">
+              <h2>📝 Summary</h2>
+              <button className="download-btn" onClick={handleDownload}>⬇️ Download</button>
+            </div>
             <p>{aiResult.summary}</p>
           </div>
 
-          <div>
-            <h3>Quiz</h3>
-            {aiResult.quiz.map((q, i) => (
-              <div key={i} style={{ marginBottom: '20px', padding: '15px', border: '1px solid #eee', borderRadius: '8px' }}>
-                <p><strong>{i + 1}. {q.question}</strong></p>
-                {q.options.map((option, j) => {
-                  const isSelected = answers[i] === option;
-                  const isCorrect = option === q.correctAnswer;
-                  let bgColor = '#fff';
-                  if (isSelected && isCorrect) bgColor = '#c8f7c5';
-                  else if (isSelected && !isCorrect) bgColor = '#f7c5c5';
+          <div className="quiz-section">
+            <div className="quiz-header">
+              <h2>🧠 Quiz</h2>
+              {Object.keys(answers).length === aiResult.quiz.length && (
+                <span className="score-badge">Score: {score} / {aiResult.quiz.length}</span>
+              )}
+            </div>
 
-                  return (
-                    <div
-                      key={j}
-                      onClick={() => handleAnswerSelect(i, option)}
-                      style={{
-                        padding: '8px',
-                        marginTop: '5px',
-                        border: '1px solid #ddd',
-                        borderRadius: '5px',
-                        cursor: 'pointer',
-                        backgroundColor: bgColor,
-                      }}
-                    >
-                      {option}
-                    </div>
-                  );
-                })}
+            {aiResult.quiz.map((q, i) => (
+              <div key={i} className="question-card">
+                <p className="question-text">{i + 1}. {q.question}</p>
+                <div className="options-grid">
+                  {q.options.map((option, j) => {
+                    const isSelected = answers[i] === option;
+                    const isCorrect = option === q.correctAnswer;
+                    let optionClass = 'option';
+                    if (isSelected && isCorrect) optionClass += ' correct';
+                    else if (isSelected && !isCorrect) optionClass += ' incorrect';
+
+                    return (
+                      <div
+                        key={j}
+                        onClick={() => handleAnswerSelect(i, option)}
+                        className={optionClass}
+                      >
+                        {option}
+                      </div>
+                    );
+                  })}
+                </div>
                 {answers[i] && (
-                  <p style={{ marginTop: '8px', fontSize: '14px' }}>
-                    {answers[i] === q.correctAnswer ? '✅ Correct!' : `❌ Correct answer: ${q.correctAnswer}`}
+                  <p className="answer-feedback">
+                    {answers[i] === q.correctAnswer
+                      ? '✅ Correct!'
+                      : `❌ Correct answer: ${q.correctAnswer}`}
                   </p>
                 )}
               </div>
